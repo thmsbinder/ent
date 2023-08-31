@@ -37,10 +37,11 @@ type MapEntry struct {
 	RequestBytes    []byte    `firestore:"6"`
 }
 
-func (s *Store) GetMapEntry(ctx context.Context, publicKey []byte, label string) (*MapEntry, error) {
-	doc, err := s.c.Collection(MapEntryCollection).Query.Where("0", "==", publicKey).Where("1", "==", label).Documents(ctx).Next()
-	if err != nil {
-		return nil, err
+func (s *Store) GetMapEntry(ctx context.Context, publicKey []byte, tag string) (*MapEntry, error) {
+	docs := s.c.Collection(MapEntryCollection).Query.Where("0", "==", publicKey).Where("1", "==", tag).Documents(ctx)
+	doc, err := docs.Next()
+	if err != nil { // Not found
+		return nil, nil
 	}
 	e := MapEntry{}
 	if err := doc.DataTo(&e); err != nil {
