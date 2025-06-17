@@ -28,6 +28,7 @@ import (
 	"github.com/google/ent/cmd/ent/config"
 	"github.com/google/ent/log"
 	"github.com/google/ent/utils"
+	"github.com/multiformats/go-multihash"
 	"github.com/spf13/cobra"
 )
 
@@ -42,13 +43,21 @@ var getCmd = &cobra.Command{
 	Args: cobra.ExactArgs(0),
 	Run: func(cmd *cobra.Command, args []string) {
 		ctx := context.Background()
-		digest, err := utils.ParseDigest(digestFlag)
+		expectedDigest, err := utils.ParseDigest(digestFlag)
 		if err != nil {
 			log.Criticalf(ctx, "parse digest: %v", err)
 			os.Exit(1)
 		}
+
+		parsedDigest, err := multihash.Decode(expectedDigest)
+		if err != nil {
+			log.Criticalf(ctx, "decode digest: %v", err)
+			os.Exit(1)
+		}
+		fmt.Printf("parsed digest: %+v\n", parsedDigest)
+
 		// Make API request to get entry metadata and mirrors
-		resp, err := getEntry(ctx, digest)
+		resp, err := getEntry(ctx, expectedDigest)
 		if err != nil {
 			log.Criticalf(ctx, "get entry request failed: %v", err)
 			os.Exit(1)
@@ -71,16 +80,26 @@ var getCmd = &cobra.Command{
 				os.Exit(1)
 			}
 
+			actualDigest, err := multihash.Sum(body, parsedDigest.Code, -1)
+			if err != nil {
+				log.Criticalf(ctx, "compute digest: %v", err)
+				os.Exit(1)
+			}
+
+			log.Debugf(ctx, "expected digest: %v", utils.DigestToHumanString(expectedDigest))
+			log.Debugf(ctx, "actual digest:   %v", utils.DigestToHumanString(actualDigest))
+
 			// Verify the digest matches
-			actualDigest := utils.ComputeDigest(body)
-			if !bytes.Equal(actualDigest, digest) {
-				log.Criticalf(ctx, "digest mismatch: got %v, want %v", actualDigest, digest)
+			if !bytes.Equal(actualDigest, expectedDigest) {
+				log.Criticalf(ctx, "digest mismatch: got %v, want %v", actualDigest, expectedDigest)
 				continue
 			}
 			log.Debugf(ctx, "digest matches")
 
 			if outFlag != "" {
 				os.WriteFile(outFlag, body, 0644)
+			} else {
+				log.Infof(ctx, "no output file specified. use --out to write to a file")
 			}
 
 			os.Exit(0)
@@ -93,7 +112,7 @@ func getEntry(ctx context.Context, digest utils.Digest) (*api.GetEntryResponse, 
 	req := api.GetEntryRequest{
 		Digests: utils.DigestToApi(digest),
 	}
-	log.Debugf(ctx, "sending request: %v", req)
+	log.Debugf(ctx, "sending request: %+v", req)
 	var resp api.GetEntryResponse
 	config := config.ReadConfig()
 	client := &http.Client{}
